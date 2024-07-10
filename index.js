@@ -91,7 +91,7 @@ bot.action('play_game', async (ctx) => {
         await knex('room_member').where({ 'room_id': room.id, 'member_id': player.member_id }).update({ 'role': memberRole })
         await client.set(`players:${player.member_id}`, room.id)
 
-        ctx.reply(`${player.member_name} عزیز \n بازی شروع شد!🏁` + `\n\n نقش شما در بازی: ${getRoleLable(memberRole)}`, { chat_id: player.member_id })
+        ctx.reply(`${player.member_name} عزیز \n بازی شروع شد!🏁` + `\n\n نقش شما در بازی: ${getRoleLable(memberRole)}` + `\n\n نوبت صحبت پلیر شماره 1`, { chat_id: player.member_id })
     }
 
     // player 1 open
@@ -115,6 +115,61 @@ bot.action('play_game', async (ctx) => {
 
 })
 
+bot.hears("نفر بعد ⏭️", async (ctx) => {
+    const chatId  = ctx.chat.id
+
+    const room = await knex('rooms').where({ 'owner_room': chatId, 'status': 'started' }).first()
+
+    if(room){
+        const players = await knex('room_member').whereRaw(`room_id = ${room.id}`)
+
+        // player 1 open
+        const getSpeekTime = parseInt(await client.get(`room:${room.id}:speek`))
+        const totalCount   = parseInt(await client.get(`room:${room.id}:total`))
+
+        await client.set(`room:${room.id}:speek`, (getSpeekTime+1))
+
+        if(!((getSpeekTime+1) > totalCount)){
+            for(const player of players){
+                ctx.reply(`نوبت صحبت پلیر شماره ${(getSpeekTime+1)}`, { chat_id: player.member_id })
+            }
+            ctx.reply(`نوبت صحبت پلیر شماره ${(getSpeekTime+1)}`, { chat_id: room.owner_room })
+        }else ctx.reply(`همه بازیکن ها صحبت کردن. الان باید شب بشه!`, { chat_id: room.owner_room })
+    }
+})
+
+bot.hears("شب شدن  🌒", async (ctx) => {
+    const chatId  = ctx.chat.id
+
+    const room = await knex('rooms').where({ 'owner_room': chatId, 'status': 'started' }).first()
+
+    if(room){
+        const players = await knex('room_member').whereRaw(`room_id = ${room.id}`)
+
+        // player 1 open
+        for(const player of players){
+            ctx.reply(`شب شد 🌒`, { chat_id: player.member_id })
+        }
+    }
+})
+
+bot.hears("روز شدن ☀️", async (ctx) => {
+    const chatId  = ctx.chat.id
+
+    const room = await knex('rooms').where({ 'owner_room': chatId, 'status': 'started' }).first()
+
+    if(room){
+        const players = await knex('room_member').whereRaw(`room_id = ${room.id}`)
+
+        await client.set(`room:${room.id}:speek`, 1)
+
+        // player 1 open
+        for(const player of players){
+            ctx.reply(`روز شد ☀️ \n بازیکن شماره یک میتونه صحبت کنه`, { chat_id: player.member_id })
+        }
+    }
+})
+
 bot.on('message', async (ctx) => {
     const chatId  = ctx.chat.id
     const message = ctx.message.text
@@ -123,6 +178,7 @@ bot.on('message', async (ctx) => {
     // have game 
     const playerRoom = await client.get(`players:${chatId}`)
 
+    // setting room
     if(action){
         const memberRoom = await knex('rooms').where('owner_room', chatId).orderBy('id', 'DESC').first()
         if(memberRoom){
@@ -144,19 +200,40 @@ bot.on('message', async (ctx) => {
         }
     }
 
+    // message players in game
     if(playerRoom){
         const speekTime    =  await  client.get(`room:${playerRoom}:speek`)
         const totalPLayers =  await  client.get(`room:${playerRoom}:total`)
+        const room         =  await  knex('rooms').where('id', playerRoom).first()
 
         // get players 
         const player  = await knex('room_member').where({ 'room_id': playerRoom, 'member_id': chatId }).first()
         const players = await knex('room_member').whereRaw(`room_id = ${playerRoom} && member_id != ${chatId}`)
 
-        if(speekTime == player.member_number){
-            for(const otherPlayer of players){
-                ctx.reply(`(${player.member_number}) ${player.member_name}: \n${message}`, { chat_id: otherPlayer.member_id })
+        // talking mafia players in night
+        if(speekTime > totalPLayers){
+            if(player.role == "shahr")
+                ctx.reply("شما شهروند هستید و شهروندان توی شب اجازه صحبت ندارند 🌒")
+            else if(player.role == "mafia"){
+                for(const mafiaPlayer of players){
+                    if(mafiaPlayer.role == "mafia"){
+                        ctx.reply(`(${player.member_number}) ${player.member_name}: \n${message}`, { chat_id: mafiaPlayer.member_id })
+                    }
+                }
+                ctx.reply(`(${player.member_number}) ${player.member_name}: \n${message}`, { chat_id: room.owner_room })
             }
-        }else ctx.reply("نوبت صحبت شما نیست ❌")
+        }
+        else {
+            if(speekTime == player.member_number){
+                // send for god
+                ctx.reply(`(${player.member_number}) ${player.member_name}: \n${message}`, { chat_id: room.owner_room })
+    
+                // send for players
+                for(const otherPlayer of players){
+                    ctx.reply(`(${player.member_number}) ${player.member_name}: \n${message}`, { chat_id: otherPlayer.member_id })
+                }
+            }else ctx.reply("نوبت صحبت شما نیست ❌")
+        }
     }
 
 })
